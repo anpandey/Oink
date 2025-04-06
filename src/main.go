@@ -219,9 +219,13 @@ func updateDns(cfg domConfig, ipAddr ip) (bool, error) {
 	}
 
 	// Send API request
+	// TODO: need to wrap this around with exponential backoff, no external deps.
 	resp, err := client.Post(fmt.Sprintf("https://api.porkbun.com/api/json/v3/dns/retrieveByNameType/%s/%s/%s", cfg.Domain, recordType, cfg.Subdomain), "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		return false, fmt.Errorf("error sending API request: %s", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("received status code: %v", resp.StatusCode)
 	}
 	defer resp.Body.Close()
 
