@@ -16,10 +16,14 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/google/martian/v3/body"
 )
 
 type config struct {
@@ -91,13 +95,52 @@ type recordReq struct {
 	Ttl          string `json:"ttl"`
 }
 
+type apiClient struct {
+	httpClient http.Client
+	retryCount int
+}
+
+// Post with a naive exponential backoff. Returns the last error if none of the
+// attempts were successful.
+func (a *apiClient) Post(endpoint string, body []byte) (resp *http.Response, err error) {
+	for retry := 0; retry < a.retryCount + 1; retry++ {
+		// NewBuffer() takes ownership of the buffer so we need to copy it first.
+		reqBodyCopy := make([]byte, len(body))
+		copy(reqBodyCopy, body)
+		resp, err = a.httpClient.Post(endpoint, "application/json", bytes.NewBuffer(reqBodyCopy))
+
+		needsRetry := false
+		if err != nil {
+			log.Printf("Error in POST request to %q: %v", endpoint, err)
+			needsRetry = true
+		} else if resp.StatusCode != http.StatusOK {
+			log.Printf("Got status %v instead of OK in request to %q", resp.StatusCode, endpoint)
+			err = fmt.Errorf("got status %v as response", resp.StatusCode)
+			needsRetry = true
+		} else {
+			return
+		}
+
+		if needsRetry && retry < a.retryCount {
+			mult := math.Pow(2, float64(retry)) * float64(2 * time.Second)
+			time.Sleep(time.Duration(mult))
+		}
+
+		resp.Body.Close()
+	}
+	return
+}
+
 // Get the current IP address
 // Requests the IP address from the porkbun API & checks if the API keys are valid
 func getIp(cfg domConfig) (ip, error) {
 	ipAddr := ip{}
 
-	client := http.Client{
-		Timeout: 30 * time.Second,
+	client := apiClient{
+		retryCount: 3,
+		httpClient: http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 
 	// Prepare request body
@@ -110,7 +153,7 @@ func getIp(cfg domConfig) (ip, error) {
 	}
 
 	// Send API request
-	resp, err := client.Post("https://api.porkbun.com/api/json/v3/ping", "application/json", bytes.NewBuffer(reqBody))
+	resp, err := client.Post("https://api.porkbun.com/api/json/v3/ping", reqBody)
 	if err != nil {
 		return ipAddr, fmt.Errorf("error sending API request: %s", err)
 	}
@@ -195,8 +238,11 @@ func getIp4(cfg domConfig) (ip, error) {
 // Updates the DNS record with the current IP address
 // Returns true if the record was updated, false if it wasn't
 func updateDns(cfg domConfig, ipAddr ip) (bool, error) {
-	client := http.Client{
-		Timeout: 30 * time.Second,
+	client := apiClient{
+		retryCount: 4,
+		httpClient: http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 
 	// Prepare request body
@@ -216,15 +262,7 @@ func updateDns(cfg domConfig, ipAddr ip) (bool, error) {
 	}
 
 	// Send API request
-	// TODO: need to wrap this around with exponential backoff, no external deps.
-	resp, err := client.Post(fmt.Sprintf("https://api.porkbun.com/api/json/v3/dns/retrieveByNameType/%s/%s/%s", cfg.Domain, recordType, cfg.Subdomain), "application/json", bytes.NewBuffer(reqBody))
-	if err != nil {
-		return false, fmt.Errorf("error sending API request: %s", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("received status code: %v", resp.StatusCode)
-	}
-	defer resp.Body.Close()
+	resp, err := client.Post(fmt.Sprintf("https://api.porkbun.com/api/json/v3/dns/retrieveByNameType/%s/%s/%s", cfg.Domain, recordType, cfg.Subdomain), body)
 
 	// Parse API response
 	var data dnsResp
