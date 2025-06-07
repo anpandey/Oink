@@ -17,13 +17,10 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"math/rand/v2"
 	"net"
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/google/martian/v3/body"
 )
 
 type config struct {
@@ -262,7 +259,7 @@ func updateDns(cfg domConfig, ipAddr ip) (bool, error) {
 	}
 
 	// Send API request
-	resp, err := client.Post(fmt.Sprintf("https://api.porkbun.com/api/json/v3/dns/retrieveByNameType/%s/%s/%s", cfg.Domain, recordType, cfg.Subdomain), body)
+	resp, err := client.Post(fmt.Sprintf("https://api.porkbun.com/api/json/v3/dns/retrieveByNameType/%s/%s/%s", cfg.Domain, recordType, cfg.Subdomain), reqBody)
 
 	// Parse API response
 	var data dnsResp
@@ -312,7 +309,7 @@ func updateDns(cfg domConfig, ipAddr ip) (bool, error) {
 	}
 
 	// Send API request
-	resp, err = client.Post(fmt.Sprintf("https://api.porkbun.com/api/json/v3/dns/edit/%s/%s", cfg.Domain, recordId), "application/json", bytes.NewBuffer(reqBody))
+	resp, err = client.Post(fmt.Sprintf("https://api.porkbun.com/api/json/v3/dns/edit/%s/%s", cfg.Domain, recordId), reqBody)
 	if err != nil {
 		return false, fmt.Errorf("error sending API request: %s", err)
 	}
