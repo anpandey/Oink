@@ -119,8 +119,9 @@ func (a *apiClient) Post(endpoint string, body []byte) (resp *http.Response, err
 		}
 
 		if needsRetry && retry < a.retryCount {
-			mult := math.Pow(2, float64(retry)) * float64(2 * time.Second)
-			time.Sleep(time.Duration(mult))
+			mult := time.Duration(math.Pow(2, float64(retry)) * float64(2 * time.Second))
+			log.Printf("Retrying POST request to %q after %v", endpoint, mult)
+			time.Sleep(mult)
 		}
 
 		resp.Body.Close()
